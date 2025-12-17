@@ -90,4 +90,6 @@ public interface MarketLocationRepository extends JpaRepository<MarketLocation, 
 
     Optional<MarketLocation> findById(Long id);
 
+    boolean existsByMarketLocation(String marketLocation);
+    boolean existsByMarketLocationAndIdNot(String marketLocation, Long id);
 }
