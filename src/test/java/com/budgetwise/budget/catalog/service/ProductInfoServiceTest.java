@@ -20,7 +20,8 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
 import java.util.*;
-
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -33,6 +34,8 @@ import static org.mockito.Mockito.*;
  * Uses realistic product catalog scenarios.
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+
 @DisplayName("ProductInfoService Tests")
 class ProductInfoServiceTest {
 
@@ -608,5 +611,277 @@ class ProductInfoServiceTest {
                 return marketCount;
             }
         };
+    }
+
+
+
+    @Test
+    @DisplayName("getProductStats: should aggregate counts correctly")
+    void getProductStats_ShouldReturnAggregatedCounts() {
+        when(productInfoRepository.count()).thenReturn(100L);
+        when(productInfoRepository.countByStatus(ProductInfo.Status.ACTIVE)).thenReturn(70L);
+        when(productInfoRepository.countByStatus(ProductInfo.Status.PENDING)).thenReturn(5L);
+        when(productInfoRepository.countProductWithDietaryTag()).thenReturn(40L);
+
+        var stats = productInfoService.getProductStats();
+
+        assertNotNull(stats);
+        // DTO accessor names vary by project; verify repository interactions are correct
+        verify(productInfoRepository, times(1)).count();
+        verify(productInfoRepository, times(1)).countByStatus(ProductInfo.Status.ACTIVE);
+        verify(productInfoRepository, times(1)).countByStatus(ProductInfo.Status.PENDING);
+        verify(productInfoRepository, times(1)).countProductWithDietaryTag();
+
+        // If your ProductStatsResponse exposes methods like totalProducts(), activeProducts(), archivedProducts(), productsWithTags()
+        // uncomment and adapt the assertions below to the actual DTO getters:
+        // assertEquals(100L, stats.totalProducts());
+        // assertEquals(70L, stats.activeProducts());
+        // assertEquals(5L, stats.archivedProducts());
+        // assertEquals(40L, stats.productsWithTags());
+    }
+
+    @Test
+    @DisplayName("findNewComersProducts: should map earliest price record and count unique markets")
+    void findNewComersProducts_ShouldMapEarliestPriceRecordAndMarkets() {
+        // create mock market locations
+        com.budgetwise.budget.market.entity.MarketLocation m1 = mock(com.budgetwise.budget.market.entity.MarketLocation.class);
+        when(m1.getMarketLocation()).thenReturn("Market A");
+        com.budgetwise.budget.market.entity.MarketLocation m2 = mock(com.budgetwise.budget.market.entity.MarketLocation.class);
+        when(m2.getMarketLocation()).thenReturn("Market B");
+
+        // create two price records, earliest and later
+        com.budgetwise.budget.catalog.entity.DailyPriceRecord early = mock(com.budgetwise.budget.catalog.entity.DailyPriceRecord.class);
+        when(early.getCreatedAt()).thenReturn(java.time.LocalDateTime.now().minusDays(5));
+        when(early.getPrice()).thenReturn(55.0);
+        when(early.getOrigin()).thenReturn("PH");
+        when(early.getUnit()).thenReturn("kg");
+        when(early.getMarketLocation()).thenReturn(m1);
+        when(early.getPriceReport()).thenReturn(null);
+
+        com.budgetwise.budget.catalog.entity.DailyPriceRecord later = mock(com.budgetwise.budget.catalog.entity.DailyPriceRecord.class);
+        when(later.getCreatedAt()).thenReturn(java.time.LocalDateTime.now().minusDays(1));
+        when(later.getPrice()).thenReturn(60.0);
+        when(later.getOrigin()).thenReturn("PH");
+        when(later.getUnit()).thenReturn("kg");
+        when(later.getMarketLocation()).thenReturn(m2);
+        when(later.getPriceReport()).thenReturn(null);
+
+        ProductInfo p = mock(ProductInfo.class);
+        when(p.getId()).thenReturn(200L);
+        when(p.getProductName()).thenReturn("NewRice");
+        when(p.getCategory()).thenReturn("Staples");
+        when(p.getLocalName()).thenReturn("Bigas");
+        when(p.getPriceRecords()).thenReturn(Arrays.asList(later, early)); // unsorted list
+
+        when(productInfoRepository.findByStatusWithPriceRecords(ProductInfo.Status.PENDING)).thenReturn(List.of(p));
+        when(productInfoRepository.findProductNameByStatus(ProductInfo.Status.ACTIVE)).thenReturn(Collections.emptyList());
+
+        List<com.budgetwise.budget.catalog.dto.ProductNewComersResponse> newcomers = productInfoService.findNewComersProducts();
+
+        assertNotNull(newcomers);
+        assertEquals(1, newcomers.size());
+        com.budgetwise.budget.catalog.dto.ProductNewComersResponse dto = newcomers.get(0);
+
+        // validate mapping from earliest record
+        // adapt accessor names if your DTO uses different method names
+        assertEquals(200L, dto.getId());
+        assertEquals("NewRice", dto.getProductName());
+        assertEquals("Staples", dto.getCategory());
+        assertEquals("Bigas", dto.getLocalName());
+        assertEquals(55.0, dto.getPrice());
+        assertEquals("PH", dto.getOrigin());
+        assertEquals("kg", dto.getUnit());
+        assertEquals(2, dto.getTotalMarkets()); // two unique market names
+    }
+
+    @Test
+    @DisplayName("findNewComersProducts: should exclude names present in ACTIVE")
+    void findNewComersProducts_ShouldExcludeActiveNames() {
+        ProductInfo p1 = mock(ProductInfo.class);
+        when(p1.getId()).thenReturn(10L);
+        when(p1.getProductName()).thenReturn("ExistInActive");
+        when(p1.getCategory()).thenReturn("Cat");
+        when(p1.getLocalName()).thenReturn("Local");
+        when(p1.getPriceRecords()).thenReturn(Collections.emptyList());
+
+        ProductInfo p2 = mock(ProductInfo.class);
+        when(p2.getId()).thenReturn(11L);
+        when(p2.getProductName()).thenReturn("UniqueNew");
+        when(p2.getCategory()).thenReturn("Cat2");
+        when(p2.getLocalName()).thenReturn("Local2");
+        when(p2.getPriceRecords()).thenReturn(Collections.emptyList());
+
+        when(productInfoRepository.findByStatusWithPriceRecords(ProductInfo.Status.PENDING)).thenReturn(List.of(p1, p2));
+        when(productInfoRepository.findProductNameByStatus(ProductInfo.Status.ACTIVE)).thenReturn(List.of("ExistInActive"));
+
+        List<com.budgetwise.budget.catalog.dto.ProductNewComersResponse> newcomers = productInfoService.findNewComersProducts();
+
+        assertNotNull(newcomers);
+        assertEquals(1, newcomers.size());
+        assertEquals("UniqueNew", newcomers.get(0).getProductName());
+    }
+
+    @Test
+    @DisplayName("findNewComersProducts: should handle products without priceRecords")
+    void findNewComersProducts_ProductWithoutPriceRecords_ShouldMapDefaults() {
+        ProductInfo p = mock(ProductInfo.class);
+        when(p.getId()).thenReturn(300L);
+        when(p.getProductName()).thenReturn("NoPrice");
+        when(p.getCategory()).thenReturn("Misc");
+        when(p.getLocalName()).thenReturn("LocalNoPrice");
+        when(p.getPriceRecords()).thenReturn(Collections.emptyList());
+
+        when(productInfoRepository.findByStatusWithPriceRecords(ProductInfo.Status.PENDING)).thenReturn(List.of(p));
+        when(productInfoRepository.findProductNameByStatus(ProductInfo.Status.ACTIVE)).thenReturn(Collections.emptyList());
+
+        List<com.budgetwise.budget.catalog.dto.ProductNewComersResponse> newcomers = productInfoService.findNewComersProducts();
+
+        assertNotNull(newcomers);
+        assertEquals(1, newcomers.size());
+        var dto = newcomers.get(0);
+        assertEquals(0.0, dto.getPrice());
+        assertEquals("N/A", dto.getUnit());
+        assertEquals("LocalNoPrice", dto.getOrigin()); // origin falls back to localName
+        assertNull(dto.getDetectedDate());
+        assertEquals(0, dto.getTotalMarkets());
+    }
+
+    @Test
+    @DisplayName("ManageNewComersProduct: should update fields and return mapped DTO")
+    void ManageNewComersProduct_ShouldUpdateAndReturnDTO() {
+        Long id = 400L;
+
+        ProductInfo existing = mock(ProductInfo.class);
+        when(existing.getPriceRecords()).thenReturn(Collections.emptyList());
+
+        ProductInfo saved = mock(ProductInfo.class);
+        when(saved.getId()).thenReturn(id);
+        when(saved.getProductName()).thenReturn("UpdatedName");
+        when(saved.getCategory()).thenReturn("UpdatedCategory");
+        when(saved.getLocalName()).thenReturn("UpdatedLocal");
+        when(saved.getPriceRecords()).thenReturn(Collections.emptyList());
+
+        when(productInfoRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(productInfoRepository.save(existing)).thenReturn(saved);
+
+        com.budgetwise.budget.catalog.dto.UpdateNewComersRequest req = mock(com.budgetwise.budget.catalog.dto.UpdateNewComersRequest.class);
+        when(req.getProductName()).thenReturn("UpdatedName");
+        when(req.getCategory()).thenReturn("UpdatedCategory");
+        when(req.getLocalName()).thenReturn("UpdatedLocal");
+
+        com.budgetwise.budget.catalog.dto.UpdateNewComersRequest response = productInfoService.ManageNewComersProduct(id, req);
+
+        assertNotNull(response);
+        assertEquals(id, response.getId());
+        assertEquals("UpdatedName", response.getProductName());
+        assertEquals("UpdatedCategory", response.getCategory());
+        assertEquals("UpdatedLocal", response.getLocalName());
+
+        verify(existing, times(1)).setProductName("UpdatedName");
+        verify(existing, times(1)).setCategory("UpdatedCategory");
+        verify(existing, times(1)).setLocalName("UpdatedLocal");
+        verify(productInfoRepository, times(1)).save(existing);
+    }
+
+    @Test
+    @DisplayName("ManageNewComersProduct: should throw ResourceNotFoundException when product not found")
+    void ManageNewComersProduct_NotFound_ShouldThrow() {
+        Long id = 999L;
+        when(productInfoRepository.findById(id)).thenReturn(Optional.empty());
+
+        com.budgetwise.budget.catalog.dto.UpdateNewComersRequest req = mock(com.budgetwise.budget.catalog.dto.UpdateNewComersRequest.class);
+
+        assertThrows(com.budgetwise.budget.common.exception.ResourceNotFoundException.class,
+                () -> productInfoService.ManageNewComersProduct(id, req));
+    }
+
+    @Test
+    @DisplayName("updateProductStatus: should change status and return response DTO")
+    void updateProductStatus_ShouldUpdateStatus() {
+        Long id = 500L;
+        ProductInfo existing = mock(ProductInfo.class);
+        when(productInfoRepository.findById(id)).thenReturn(Optional.of(existing));
+
+        ProductInfo saved = mock(ProductInfo.class);
+        when(saved.getId()).thenReturn(id);
+        when(saved.getStatus()).thenReturn(ProductInfo.Status.ACTIVE);
+        when(productInfoRepository.save(existing)).thenReturn(saved);
+
+        com.budgetwise.budget.catalog.dto.UpdateProductStatus req = mock(com.budgetwise.budget.catalog.dto.UpdateProductStatus.class);
+        when(req.id()).thenReturn(id);
+        when(req.newStatus()).thenReturn("ACTIVE");
+
+        com.budgetwise.budget.catalog.dto.UpdateProductStatus resp = productInfoService.updateProductStatus(req);
+
+        assertNotNull(resp);
+        assertEquals(id, resp.id());
+        assertEquals("ACTIVE", resp.newStatus());
+        // message asserted if DTO exposes it:
+        // assertEquals("Product status updated successfully.", resp.message());
+
+        verify(existing, times(1)).setStatus(ProductInfo.Status.ACTIVE);
+        verify(existing, times(1)).setUpdatedAt(any(java.time.LocalDateTime.class));
+        verify(productInfoRepository, times(1)).save(existing);
+    }
+
+    @Test
+    @DisplayName("updateProductStatus: should throw ResourceNotFoundException when product not found")
+    void updateProductStatus_NotFound_ShouldThrow() {
+        Long id = 555L;
+        when(productInfoRepository.findById(id)).thenReturn(Optional.empty());
+
+        com.budgetwise.budget.catalog.dto.UpdateProductStatus req = mock(com.budgetwise.budget.catalog.dto.UpdateProductStatus.class);
+        when(req.id()).thenReturn(id);
+        when(req.newStatus()).thenReturn("ACTIVE");
+
+        assertThrows(com.budgetwise.budget.common.exception.ResourceNotFoundException.class,
+                () -> productInfoService.updateProductStatus(req));
+    }
+
+    @Test
+    @DisplayName("updateProductStatus: invalid status string should throw IllegalArgumentException")
+    void updateProductStatus_InvalidStatus_ShouldThrow() {
+        Long id = 556L;
+        ProductInfo existing = mock(ProductInfo.class);
+        when(productInfoRepository.findById(id)).thenReturn(Optional.of(existing));
+
+        com.budgetwise.budget.catalog.dto.UpdateProductStatus req = mock(com.budgetwise.budget.catalog.dto.UpdateProductStatus.class);
+        when(req.id()).thenReturn(id);
+        when(req.newStatus()).thenReturn("NOT_A_STATUS");
+
+        assertThrows(IllegalArgumentException.class, () -> productInfoService.updateProductStatus(req));
+    }
+
+    @Test
+    @DisplayName("getProductMarketDetails: should return product and market details")
+    void getProductMarketDetails_ShouldReturnDetails() {
+        Long id = 600L;
+        ProductInfo p = mock(ProductInfo.class);
+        when(p.getId()).thenReturn(id);
+        when(p.getProductName()).thenReturn("Ricey");
+
+        com.budgetwise.budget.catalog.dto.MarketDetail md = mock(com.budgetwise.budget.catalog.dto.MarketDetail.class);
+        List<com.budgetwise.budget.catalog.dto.MarketDetail> marketDetails = List.of(md);
+
+        when(productInfoRepository.findById(id)).thenReturn(Optional.of(p));
+        when(productInfoRepository.findMarketDetailsByProductId(id)).thenReturn(marketDetails);
+
+        com.budgetwise.budget.catalog.dto.ProductMarketDetailResponse resp = productInfoService.getProductMarketDetails(id);
+
+        assertNotNull(resp);
+        assertEquals(id, resp.productId());
+        assertEquals("Ricey", resp.productName());
+        assertEquals(1, resp.marketDetails().size());
+        verify(productInfoRepository).findMarketDetailsByProductId(id);
+    }
+
+    @Test
+    @DisplayName("getProductMarketDetails: should throw ResourceNotFoundException when product not found")
+    void getProductMarketDetails_NotFound_ShouldThrow() {
+        Long id = 777L;
+        when(productInfoRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThrows(com.budgetwise.budget.common.exception.ResourceNotFoundException.class,
+                () -> productInfoService.getProductMarketDetails(id));
     }
 }

@@ -247,6 +247,7 @@ public class ProductInfoService {
         product.setStatus(request.newStatus().equalsIgnoreCase(request.newStatus())
                 ? ProductInfo.Status.valueOf(request.newStatus())
                 : product.getStatus());
+        product.setUpdatedAt(java.time.LocalDateTime.now());
 
 
 

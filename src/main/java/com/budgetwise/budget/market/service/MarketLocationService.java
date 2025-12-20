@@ -82,6 +82,7 @@ public class MarketLocationService {
                 .orElseThrow(() -> new IllegalArgumentException("Market with ID " + status.id() + " does not exist."));
 
         marketLocation.setStatus(status.newStatus());
+        marketLocation.setUpdatedAt(LocalDateTime.now());
         marketLocationRepository.save(marketLocation);
 
         return status;
