@@ -1,5 +1,6 @@
 package com.budgetwise.budget.catalog.repository;
 
+import com.budgetwise.budget.catalog.dto.ArchiveTableResponse;
 import com.budgetwise.budget.catalog.dto.MarketDetail;
 import com.budgetwise.budget.catalog.dto.ProductTableResponse;
 import com.budgetwise.budget.catalog.entity.ProductInfo;
@@ -10,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 @Repository
@@ -75,6 +78,13 @@ AND dpr.origin = :origin
 
    long countByStatus(ProductInfo.Status status);
 
+        long countByStatusInAndUpdatedAtBetween(
+                Collection<ProductInfo.Status> statuses,
+                LocalDateTime start,
+                LocalDateTime end
+        );
+
+
    @Query("SELECT COUNT(p) FROM ProductInfo p WHERE p.productDietaryTags IS NOT EMPTY")
    long countProductWithDietaryTag();
 
@@ -113,5 +123,54 @@ AND dpr.origin = :origin
     List<MarketDetail> findMarketDetailsByProductId(@Param("productId") Long productId);
 
 
+
+    @Query("""
+        SELECT new com.budgetwise.budget.catalog.dto.ArchiveTableResponse(
+            p.id,
+            p.productName,
+            p.category,
+            r.price,
+            r.unit,
+            r.origin,
+            p.updatedAt
+        )
+        FROM ProductInfo p
+        LEFT JOIN DailyPriceRecord r ON r.id = (
+            SELECT MAX(r2.id) 
+            FROM DailyPriceRecord r2 
+            WHERE r2.productInfo.id = p.id
+        )
+        WHERE p.status IN :statuses
+          AND LOWER(p.productName) LIKE LOWER(CONCAT('%', :search, '%'))
+    """)
+    Page<ArchiveTableResponse> findArchivedProductsWithSearch(
+            @Param("statuses") Collection<ProductInfo.Status> statuses,
+            @Param("search") String search,
+            Pageable pageable
+    );
+
+    // FIXED QUERY 2: No Search
+    @Query("""
+        SELECT new com.budgetwise.budget.catalog.dto.ArchiveTableResponse(
+            p.id,
+            p.productName,
+            p.category,
+            r.price,
+            r.unit,
+            r.origin,
+            p.updatedAt
+        )
+        FROM ProductInfo p
+        LEFT JOIN DailyPriceRecord r ON r.id = (
+            SELECT MAX(r2.id) 
+            FROM DailyPriceRecord r2 
+            WHERE r2.productInfo.id = p.id
+        )
+        WHERE p.status IN :statuses
+    """)
+    Page<ArchiveTableResponse> findArchivedProductsNoSearch(
+            @Param("statuses") Collection<ProductInfo.Status> statuses,
+            Pageable pageable
+    );
 
 }

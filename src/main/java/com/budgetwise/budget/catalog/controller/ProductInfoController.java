@@ -68,4 +68,20 @@ public class ProductInfoController {
         ProductMarketDetailResponse response = productInfoService.getProductMarketDetails(id);
         return ResponseEntity.ok(response);
     }
+
+
+    @GetMapping("archive/stats")
+    public ResponseEntity<ArchiveStatsResponse> getStats() {
+        return ResponseEntity.ok(productInfoService.getArchiveStats());
+    }
+
+
+    @GetMapping("archive/table")
+    public ResponseEntity<Page<ArchiveTableResponse>> getArchivedProducts(
+            @RequestParam(required = false) String search,
+
+            @PageableDefault(size = 7, sort = "updatedAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(productInfoService.getArchivedProducts(search, pageable));
+    }
 }

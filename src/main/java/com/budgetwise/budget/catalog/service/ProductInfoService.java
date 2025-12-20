@@ -15,6 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -295,5 +298,44 @@ public class ProductInfoService {
 
 
 
+    public ArchiveStatsResponse getArchiveStats() {
+        long inactiveCount = productInfoRepository.countByStatus(ProductInfo.Status.INACTIVE);
+        long pendingCount = productInfoRepository.countByStatus(ProductInfo.Status.PENDING);
+        long totalArchived = inactiveCount + pendingCount;
+
+        YearMonth currentMonth = YearMonth.now();
+        LocalDateTime startOfMonth = currentMonth.atDay(1).atStartOfDay();
+        LocalDateTime endOfMonth = currentMonth.atEndOfMonth().atTime(LocalTime.MAX);
+
+
+        long archivedThisMonth = productInfoRepository.countByStatusInAndUpdatedAtBetween(
+                Arrays.asList(ProductInfo.Status.INACTIVE, ProductInfo.Status.PENDING),
+                startOfMonth,
+                endOfMonth
+        );
+
+
+        return new ArchiveStatsResponse(totalArchived, archivedThisMonth, pendingCount);
+    }
+
+
+
+    @Transactional(readOnly = true)
+    public Page<ArchiveTableResponse> getArchivedProducts(String searchQuery, Pageable pageable) {
+
+        // Target: INACTIVE at PENDING
+        List<ProductInfo.Status> archivedStatuses = Arrays.asList(
+                ProductInfo.Status.INACTIVE,
+                ProductInfo.Status.PENDING
+        );
+
+        if (searchQuery != null && !searchQuery.isBlank()) {
+            return productInfoRepository.findArchivedProductsWithSearch(
+                    archivedStatuses, searchQuery, pageable);
+        } else {
+            return productInfoRepository.findArchivedProductsNoSearch(
+                    archivedStatuses, pageable);
+        }
+    }
 
 }
